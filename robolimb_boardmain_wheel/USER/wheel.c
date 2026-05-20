@@ -1,0 +1,86 @@
+#include "wheel.h"
+#include "motions.h"   // CMD_FORWARD, CMD_BACKWARD
+#include "rs485.h"     // MODBUS_WriteRegister
+#include "delay.h"      // delay_ms
+#include <stdio.h>
+
+// ========== 静态变量 ==========
+static u8  wheel_state = WHEEL_STATE_IDLE;
+static u32 wheel_tick_ms = 0;
+
+// ========== 内部函数 ==========
+static void wheel_start(u8 dir) {
+    s16 speed = (dir == 1) ? WHEEL_SPEED : -WHEEL_SPEED;
+    MODBUS_WriteRegister(1, 0x0040, (u16)speed);   // 左轮: USART3
+    MODBUS2_WriteRegister(2, 0x0040, (u16)speed);  // 右轮: USART2
+    wheel_state = WHEEL_STATE_RUN;
+    printf("[WHEEL] Start: dir=%s speed=%d\r\n",
+           (dir == 1) ? "FWD" : "BWD", speed);
+}
+
+static void wheel_stop(void) {
+    MODBUS_WriteRegister(1, 0x0040, 0);   // 左轮: USART3
+    MODBUS2_WriteRegister(2, 0x0040, 0);  // 右轮: USART2
+    printf("[WHEEL] Stop\r\n");
+}
+
+// ========== 公共函数 ==========
+void wheel_init(void) {
+    RS485_Init(9600);    // USART3: 左轮 (PB10/PB11)
+    RS4852_Init(9600);   // USART2: 右轮 (PA2/PA3)
+
+    // 设RS485通讯控制模式=占空比调速 (0x0080=0)
+    MODBUS_WriteRegister(1, 0x0080, 0);   // 左轮
+    MODBUS2_WriteRegister(2, 0x0080, 0);  // 右轮
+    delay_ms(50);
+
+    // 释放电机 (0x0044=1)
+    MODBUS_WriteRegister(1, 0x0044, 1);   // 左轮
+    MODBUS2_WriteRegister(2, 0x0044, 1);  // 右轮
+    delay_ms(50);
+
+    printf("[WHEEL] Init done: mode=duty_cycle, released\r\n");
+}
+
+void wheel_step(void) {
+    if (wheel_state == WHEEL_STATE_IDLE)
+        return;
+
+    wheel_tick_ms += 10;   // 主循环每 10ms 调用一次
+    if (wheel_tick_ms >= WHEEL_RUN_MS) {
+        wheel_stop();
+        wheel_state = WHEEL_STATE_IDLE;
+        current_motion = 0;  // 清除全局状态，解除阻塞
+        wheel_tick_ms = 0;
+        printf("[WHEEL] Auto stop done\r\n");
+    }
+}
+
+void wheel_emergency_stop(void) {
+    wheel_stop();
+    wheel_state = WHEEL_STATE_IDLE;
+    current_motion = 0;  // 清除全局状态
+    wheel_tick_ms = 0;
+}
+
+// ========== 命令处理（在 main.c switch 中调用）==========
+// 返回: 0=已处理, 1=轮子忙/不是轮子命令
+u8 wheel_cmd_handler(u8 cmd) {
+    // 检查全局动作状态，任何动作进行中都阻塞
+    if (current_motion != 0) {
+        printf("[WHEEL] Blocked: current_motion=0x%02X\r\n", current_motion);
+        return 1;  // 有动作正在执行，阻塞
+    }
+    
+    switch (cmd) {
+        case CMD_FORWARD:
+            current_motion = CMD_FORWARD;  // 设置全局状态，阻塞其他动作
+            wheel_start(1);
+            return 0;
+        case CMD_BACKWARD:
+            current_motion = CMD_BACKWARD; // 设置全局状态，阻塞其他动作
+            wheel_start(2);
+            return 0;
+    }
+    return 1;   // 不是轮子命令
+}
