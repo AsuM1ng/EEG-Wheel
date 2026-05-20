@@ -13,12 +13,6 @@
 // 初始化（上电调用一次）
 void wheel_init(void);
 
-// 开始移动（dir=1前进，dir=2后退）
-void wheel_start(u8 dir);
-
-// 停止
-void wheel_stop(void);
-
 // 状态机（主循环每圈调用）
 void wheel_step(void);
 

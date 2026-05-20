@@ -90,8 +90,11 @@ int main(void) {
                     break;
                 default:
                     // 交给轮子处理
-                    if (wheel_cmd_handler(cmd) != 0) {
-                        printf("Unknown cmd: 0x%02X\r\n", cmd);
+                    {
+                        u8 ret = wheel_cmd_handler(cmd);
+                        if (ret == 1) {
+                            printf("Unknown cmd: 0x%02X\r\n", cmd);
+                        }
                     }
                     break;
             }
