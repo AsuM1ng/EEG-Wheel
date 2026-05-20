@@ -10,6 +10,8 @@ static u32 wheel_tick_ms = 0;
 static u8  wheel_link_ok = 0;
 static u8  wheel_left_id = 1;
 static u8  wheel_right_id = 2;
+static u32 wheel_baud = 9600;
+static u8  wheel_even_parity = 1;
 
 static u8 wheel_probe_left(u8 slave_id) {
     u16 val = 0;
@@ -91,19 +93,47 @@ static void wheel_stop(void) {
     printf("[WHEEL] Stop\r\n");
 }
 
+
+static u8 wheel_try_link(u32 baud, u8 even_parity)
+{
+    u8 ok;
+    RS485_Init(baud, even_parity);
+    RS4852_Init(baud, even_parity);
+    delay_ms(20);
+    ok = wheel_probe_bus_ids();
+    if (ok) {
+        wheel_baud = baud;
+        wheel_even_parity = even_parity;
+    }
+    return ok;
+}
+
 // ========== 公共函数 ==========
 void wheel_init(void) {
     u8 link_ok = 0;
 
     wheel_link_ok = 0;
-    RS485_Init(9600, 1);    // USART3: 左轮 (PB10/PB11), 8E1
-    RS4852_Init(9600, 1);   // USART2: 右轮 (PA2/PA3), 8E1
-    link_ok = wheel_probe_bus_ids();
+    printf("[WHEEL] Try link: 9600 8E1...\r\n");
+    link_ok = wheel_try_link(9600, 1);
     if (!link_ok) {
-        printf("[WHEEL] Probe failed with 8E1, retry 8N2...\r\n");
-        RS485_Init(9600, 0);
-        RS4852_Init(9600, 0);
-        link_ok = wheel_probe_bus_ids();
+        printf("[WHEEL] Try link: 9600 8N2...\r\n");
+        link_ok = wheel_try_link(9600, 0);
+    }
+    if (!link_ok) {
+        printf("[WHEEL] Try link: 19200 8E1...\r\n");
+        link_ok = wheel_try_link(19200, 1);
+    }
+    if (!link_ok) {
+        printf("[WHEEL] Try link: 19200 8N2...\r\n");
+        link_ok = wheel_try_link(19200, 0);
+    }
+    if (!link_ok) {
+        printf("[WHEEL] Try link: 115200 8E1...\r\n");
+        link_ok = wheel_try_link(115200, 1);
+    }
+    if (!link_ok) {
+        printf("[WHEEL] Try link: 115200 8N2...\r\n");
+        link_ok = wheel_try_link(115200, 0);
     }
     printf("[WHEEL] RS485 dual-bus probe: %s\r\n", link_ok ? "OK" : "FAILED");
     if (!link_ok) {
@@ -113,6 +143,7 @@ void wheel_init(void) {
     }
 
     wheel_link_ok = 1;
+    printf("[WHEEL] Link cfg: baud=%lu, %s\r\n", wheel_baud, wheel_even_parity ? "8E1" : "8N2");
     printf("[WHEEL] Detected slave IDs: left=%u right=%u\r\n", wheel_left_id, wheel_right_id);
 
     // 设RS485通讯控制模式=占空比调速 (0x0080=0)
