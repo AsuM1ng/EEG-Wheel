@@ -23,15 +23,17 @@ static u8 wheel_probe_right(u8 slave_id) {
 
 static u8 wheel_probe_bus_ids(void)
 {
-    if (wheel_probe_left(1)) wheel_left_id = 1;
-    else if (wheel_probe_left(2)) wheel_left_id = 2;
-    else return 0;
+    u8 left_ok = 0;
+    u8 right_ok = 0;
 
-    if (wheel_probe_right(2)) wheel_right_id = 2;
-    else if (wheel_probe_right(1)) wheel_right_id = 1;
-    else return 0;
+    if (wheel_probe_left(1)) { wheel_left_id = 1; left_ok = 1; }
+    else if (wheel_probe_left(2)) { wheel_left_id = 2; left_ok = 1; }
 
-    return 1;
+    if (wheel_probe_right(2)) { wheel_right_id = 2; right_ok = 1; }
+    else if (wheel_probe_right(1)) { wheel_right_id = 1; right_ok = 1; }
+
+    printf("[WHEEL] Probe result: left=%s right=%s\r\n", left_ok ? "OK" : "FAIL", right_ok ? "OK" : "FAIL");
+    return (left_ok && right_ok) ? 1 : 0;
 }
 
 static u8 wheel_write_speed_both(s16 speed) {
@@ -103,7 +105,7 @@ void wheel_init(void) {
         RS4852_Init(9600, 0);
         link_ok = wheel_probe_bus_ids();
     }
-    printf("[WHEEL] RS485 probe: %s\r\n", link_ok ? "OK" : "FAILED");
+    printf("[WHEEL] RS485 dual-bus probe: %s\r\n", link_ok ? "OK" : "FAILED");
     if (!link_ok) {
         printf("[WHEEL] Init aborted: no driver response on both ports\r\n");
         wheel_state = WHEEL_STATE_IDLE;
@@ -150,17 +152,17 @@ void wheel_emergency_stop(void) {
 }
 
 // ========== 命令处理（在 main.c switch 中调用）==========
-// 返回: 0=已处理, 1=轮子忙/不是轮子命令
+// 返回: 0=已处理, 1=不是轮子命令, 2=轮子暂不可执行
 u8 wheel_cmd_handler(u8 cmd) {
     if (!wheel_link_ok) {
         printf("[WHEEL] Command blocked: driver link not ready\r\n");
-        return 1;
+        return 2;
     }
 
     // 检查全局动作状态，任何动作进行中都阻塞
     if (current_motion != 0) {
         printf("[WHEEL] Blocked: current_motion=0x%02X\r\n", current_motion);
-        return 1;  // 有动作正在执行，阻塞
+        return 2;  // 有动作正在执行，阻塞
     }
 
     switch (cmd) {
