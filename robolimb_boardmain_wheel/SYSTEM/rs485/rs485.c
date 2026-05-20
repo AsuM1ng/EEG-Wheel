@@ -2,6 +2,16 @@
 #include "delay.h"
 #include <stdio.h>
 
+static u8 modbus_crc_ok(const u8 *frame, u8 len)
+{
+    u16 crc_calc;
+    u16 crc_recv;
+    if (len < 2) return 0;
+    crc_calc = CRC16((u8*)frame, len - 2);
+    crc_recv = (u16)frame[len - 2] | ((u16)frame[len - 1] << 8);
+    return (crc_calc == crc_recv) ? 1 : 0;
+}
+
 // ========== 硬件定义 ==========
 // USART3: TX=PB10, RX=PB11
 #define RS485_USART        USART3
@@ -68,7 +78,7 @@ void RS485_Init(u32 baudrate, u8 even_parity)
     // 5. USART3 配置: 9600, 8E1/8N1
     USART_InitStructure.USART_BaudRate            = baudrate;
     USART_InitStructure.USART_WordLength        = even_parity ? USART_WordLength_9b : USART_WordLength_8b;
-    USART_InitStructure.USART_StopBits          = USART_StopBits_1;
+    USART_InitStructure.USART_StopBits          = even_parity ? USART_StopBits_1 : USART_StopBits_2;
     USART_InitStructure.USART_Parity            = even_parity ? USART_Parity_Even : USART_Parity_No;
     USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
     USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
@@ -84,7 +94,7 @@ void RS485_Init(u32 baudrate, u8 even_parity)
     NVIC_InitStructure.NVIC_IRQChannelCmd                 = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    printf("[RS485] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N1");
+    printf("[RS485] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N2");
 }
 
 // ========== USART3 中断: 接收 ==========
@@ -174,7 +184,7 @@ u8 MODBUS_WriteRegister(u8 slave_addr, u16 reg_addr, u16 value)
     }
 
     // 检查: 从站回送应与发送帧完全一致(功能码0x06正常响应)
-    if (rx_buf[0] != slave_addr || rx_buf[1] != 0x06) {
+    if (rx_len != 8 || !modbus_crc_ok(rx_buf, 8) || rx_buf[0] != slave_addr || rx_buf[1] != 0x06) {
         // 异常响应 (功能码0x86)
         if (rx_buf[1] == 0x86) {
             printf("[RS485] Exception! slave=%d error_code=0x%02X\r\n",
@@ -211,8 +221,8 @@ u8 MODBUS_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
     RS485_FlushRx();
     RS485_SendBytes(tx_frame, 8);
 
-    // 读响应: [ADR][0x03][字节数][数据H][数据L][CRCL][CRCH] = 6字节
-    u8 rx_len = RS485_WaitResponse(rx_buf, 6, 200);
+    // 读响应: [ADR][0x03][字节数][数据H][数据L][CRCL][CRCH] = 7字节
+    u8 rx_len = RS485_WaitResponse(rx_buf, 7, 200);
     if (rx_len == 0) {
         printf("[RS485] Read timeout! slave=%d reg=0x%04X\r\n", slave_addr, reg_addr);
         return 1;
@@ -220,6 +230,11 @@ u8 MODBUS_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
 
     if (rx_buf[1] == 0x83) {  // 读异常
         printf("[RS485] Read exception! slave=%d error=0x%02X\r\n", slave_addr, rx_buf[2]);
+        return 2;
+    }
+
+    if (rx_len != 7 || rx_buf[0] != slave_addr || rx_buf[1] != 0x03 || rx_buf[2] != 0x02 || !modbus_crc_ok(rx_buf, 7)) {
+        printf("[RS485] Read response invalid! slave=%d len=%d\r\n", slave_addr, rx_len);
         return 2;
     }
 
@@ -264,10 +279,10 @@ void RS4852_Init(u32 baudrate, u8 even_parity)
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
-    // 4. USART2 配置: 9600, 8E1/8N1
+    // 4. USART2 配置: 9600, 8E1/8N2
     USART_InitStructure.USART_BaudRate            = baudrate;
     USART_InitStructure.USART_WordLength        = even_parity ? USART_WordLength_9b : USART_WordLength_8b;
-    USART_InitStructure.USART_StopBits          = USART_StopBits_1;
+    USART_InitStructure.USART_StopBits          = even_parity ? USART_StopBits_1 : USART_StopBits_2;
     USART_InitStructure.USART_Parity            = even_parity ? USART_Parity_Even : USART_Parity_No;
     USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
     USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
@@ -283,7 +298,7 @@ void RS4852_Init(u32 baudrate, u8 even_parity)
     NVIC_InitStructure.NVIC_IRQChannelCmd                 = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    printf("[RS485-2] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N1");
+    printf("[RS485-2] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N2");
 }
 
 void USART2_IRQHandler(void)
@@ -357,7 +372,7 @@ u8 MODBUS2_WriteRegister(u8 slave_addr, u16 reg_addr, u16 value)
                slave_addr, reg_addr, (s16)value);
         return 1;
     }
-    if (rx_buf[0] != slave_addr || rx_buf[1] != 0x06) {
+    if (rx_len != 8 || !modbus_crc_ok(rx_buf, 8) || rx_buf[0] != slave_addr || rx_buf[1] != 0x06) {
         if (rx_buf[1] == 0x86) {
             printf("[RS485-2] Exception! slave=%d error=0x%02X\r\n",
                    slave_addr, rx_buf[2]);
@@ -390,7 +405,7 @@ u8 MODBUS2_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
     RS4852_FlushRx();
     RS4852_SendBytes(tx_frame, 8);
 
-    u8 rx_len = RS4852_WaitResponse(rx_buf, 6, 200);
+    u8 rx_len = RS4852_WaitResponse(rx_buf, 7, 200);
     if (rx_len == 0) {
         printf("[RS485-2] Read timeout! slave=%d reg=0x%04X\r\n", slave_addr, reg_addr);
         return 1;
@@ -399,6 +414,12 @@ u8 MODBUS2_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
         printf("[RS485-2] Read exception! slave=%d error=0x%02X\r\n", slave_addr, rx_buf[2]);
         return 2;
     }
+
+    if (rx_len != 7 || rx_buf[0] != slave_addr || rx_buf[1] != 0x03 || rx_buf[2] != 0x02 || !modbus_crc_ok(rx_buf, 7)) {
+        printf("[RS485-2] Read response invalid! slave=%d len=%d\r\n", slave_addr, rx_len);
+        return 2;
+    }
+
     *value = ((u16)rx_buf[3] << 8) | rx_buf[4];
     printf("[RS485-2] Read OK: slave=%d reg=0x%04X val=%d\r\n",
            slave_addr, reg_addr, *value);
