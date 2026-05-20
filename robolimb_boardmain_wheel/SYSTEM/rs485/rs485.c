@@ -125,12 +125,13 @@ static u8 RS485_WaitResponse(u8 *buf, u8 expected_len, u32 timeout_ms)
 
     for (start = 0; start < timeout_ms * 1000; start += 500) {
         if (rs485_rx_len >= expected_len) {
+            u8 got_len = rs485_rx_len;
             u8 i;
-            for (i = 0; i < rs485_rx_len && i < expected_len; i++) {
+            for (i = 0; i < got_len && i < expected_len; i++) {
                 buf[i] = rs485_rx_buf[i];
             }
             RS485_FlushRx();
-            return rs485_rx_len;  // 返回实际收到的字节数
+            return got_len;  // 返回实际收到的字节数
         }
         delay_us(500);
     }
@@ -316,12 +317,13 @@ static u8 RS4852_WaitResponse(u8 *buf, u8 expected_len, u32 timeout_ms)
     delay_us(200);
     for (start = 0; start < timeout_ms * 1000; start += 500) {
         if (rs4852_rx_len >= expected_len) {
+            u8 got_len = rs4852_rx_len;
             u8 i;
-            for (i = 0; i < rs4852_rx_len && i < expected_len; i++) {
+            for (i = 0; i < got_len && i < expected_len; i++) {
                 buf[i] = rs4852_rx_buf[i];
             }
             RS4852_FlushRx();
-            return rs4852_rx_len;
+            return got_len;
         }
         delay_us(500);
     }
