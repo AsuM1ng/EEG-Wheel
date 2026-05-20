@@ -34,7 +34,7 @@ u16 CRC16(u8 *data, u16 len)
 }
 
 // ========== USART3 初始化 (9600, 8E1) ==========
-void RS485_Init(u32 baudrate)
+void RS485_Init(u32 baudrate, u8 even_parity)
 {
     GPIO_InitTypeDef  GPIO_InitStructure;
     USART_InitTypeDef USART_InitStructure;
@@ -65,11 +65,11 @@ void RS485_Init(u32 baudrate)
 
     // (PA8 方向控制已移除 -- 自动切换模块)
 
-    // 5. USART3 配置: 9600, 8E1
+    // 5. USART3 配置: 9600, 8E1/8N1
     USART_InitStructure.USART_BaudRate            = baudrate;
-    USART_InitStructure.USART_WordLength        = USART_WordLength_9b;  // 9位=8数据+1校验
+    USART_InitStructure.USART_WordLength        = even_parity ? USART_WordLength_9b : USART_WordLength_8b;
     USART_InitStructure.USART_StopBits          = USART_StopBits_1;
-    USART_InitStructure.USART_Parity            = USART_Parity_Even;    // 偶校验
+    USART_InitStructure.USART_Parity            = even_parity ? USART_Parity_Even : USART_Parity_No;
     USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
     USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
     USART_Init(RS485_USART, &USART_InitStructure);
@@ -84,7 +84,7 @@ void RS485_Init(u32 baudrate)
     NVIC_InitStructure.NVIC_IRQChannelCmd                 = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    printf("[RS485] Init done, baud=%lu, 8E1, auto-dir\r\n", baudrate);
+    printf("[RS485] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N1");
 }
 
 // ========== USART3 中断: 接收 ==========
@@ -125,12 +125,13 @@ static u8 RS485_WaitResponse(u8 *buf, u8 expected_len, u32 timeout_ms)
 
     for (start = 0; start < timeout_ms * 1000; start += 500) {
         if (rs485_rx_len >= expected_len) {
+            u8 got_len = rs485_rx_len;
             u8 i;
-            for (i = 0; i < rs485_rx_len && i < expected_len; i++) {
+            for (i = 0; i < got_len && i < expected_len; i++) {
                 buf[i] = rs485_rx_buf[i];
             }
             RS485_FlushRx();
-            return rs485_rx_len;  // 返回实际收到的字节数
+            return got_len;  // 返回实际收到的字节数
         }
         delay_us(500);
     }
@@ -234,7 +235,7 @@ u8 MODBUS_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
 static u8 rs4852_rx_buf[RS485_RX_BUF_SIZE];
 static volatile u8 rs4852_rx_len = 0;
 
-void RS4852_Init(u32 baudrate)
+void RS4852_Init(u32 baudrate, u8 even_parity)
 {
     GPIO_InitTypeDef  GPIO_InitStructure;
     USART_InitTypeDef USART_InitStructure;
@@ -263,11 +264,11 @@ void RS4852_Init(u32 baudrate)
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
-    // 4. USART2 配置: 9600, 8E1
+    // 4. USART2 配置: 9600, 8E1/8N1
     USART_InitStructure.USART_BaudRate            = baudrate;
-    USART_InitStructure.USART_WordLength        = USART_WordLength_9b;
+    USART_InitStructure.USART_WordLength        = even_parity ? USART_WordLength_9b : USART_WordLength_8b;
     USART_InitStructure.USART_StopBits          = USART_StopBits_1;
-    USART_InitStructure.USART_Parity            = USART_Parity_Even;
+    USART_InitStructure.USART_Parity            = even_parity ? USART_Parity_Even : USART_Parity_No;
     USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
     USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
     USART_Init(USART2, &USART_InitStructure);
@@ -282,7 +283,7 @@ void RS4852_Init(u32 baudrate)
     NVIC_InitStructure.NVIC_IRQChannelCmd                 = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    printf("[RS485-2] Init done, baud=%lu, 8E1, auto-dir\r\n", baudrate);
+    printf("[RS485-2] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N1");
 }
 
 void USART2_IRQHandler(void)
@@ -316,12 +317,13 @@ static u8 RS4852_WaitResponse(u8 *buf, u8 expected_len, u32 timeout_ms)
     delay_us(200);
     for (start = 0; start < timeout_ms * 1000; start += 500) {
         if (rs4852_rx_len >= expected_len) {
+            u8 got_len = rs4852_rx_len;
             u8 i;
-            for (i = 0; i < rs4852_rx_len && i < expected_len; i++) {
+            for (i = 0; i < got_len && i < expected_len; i++) {
                 buf[i] = rs4852_rx_buf[i];
             }
             RS4852_FlushRx();
-            return rs4852_rx_len;
+            return got_len;
         }
         delay_us(500);
     }

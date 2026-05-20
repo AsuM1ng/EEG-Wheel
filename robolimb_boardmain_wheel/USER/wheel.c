@@ -8,26 +8,72 @@
 static u8  wheel_state = WHEEL_STATE_IDLE;
 static u32 wheel_tick_ms = 0;
 
+static u8 wheel_probe_link(void) {
+    u16 val = 0;
+    if (MODBUS_ReadRegister(1, 0x0080, &val) == 0) return 1;
+    if (MODBUS2_ReadRegister(2, 0x0080, &val) == 0) return 1;
+    return 0;
+}
+
+static u8 wheel_write_speed_both(s16 speed) {
+    u8 ret_l = MODBUS_WriteRegister(1, 0x0040, (u16)speed);
+    u8 ret_r = MODBUS2_WriteRegister(2, 0x0040, (u16)speed);
+    if (ret_l != 0 || ret_r != 0) {
+        printf("[WHEEL] Speed write failed: L=%d R=%d speed=%d\r\n", ret_l, ret_r, speed);
+        return 1;
+    }
+    return 0;
+}
+
+static void wheel_dump_driver_status(void) {
+    u16 val = 0;
+    if (MODBUS_ReadRegister(1, 0x0080, &val) == 0) {
+        printf("[WHEEL] L reg0x0080=%u\r\n", val);
+    }
+    if (MODBUS2_ReadRegister(2, 0x0080, &val) == 0) {
+        printf("[WHEEL] R reg0x0080=%u\r\n", val);
+    }
+
+    if (MODBUS_ReadRegister(1, 0x0044, &val) == 0) {
+        printf("[WHEEL] L reg0x0044=%u\r\n", val);
+    }
+    if (MODBUS2_ReadRegister(2, 0x0044, &val) == 0) {
+        printf("[WHEEL] R reg0x0044=%u\r\n", val);
+    }
+}
+
 // ========== 内部函数 ==========
 static void wheel_start(u8 dir) {
     s16 speed = (dir == 1) ? WHEEL_SPEED : -WHEEL_SPEED;
-    MODBUS_WriteRegister(1, 0x0040, (u16)speed);   // 左轮: USART3
-    MODBUS2_WriteRegister(2, 0x0040, (u16)speed);  // 右轮: USART2
+    if (wheel_write_speed_both(speed) != 0) {
+        wheel_state = WHEEL_STATE_IDLE;
+        current_motion = 0;
+        return;
+    }
     wheel_state = WHEEL_STATE_RUN;
     printf("[WHEEL] Start: dir=%s speed=%d\r\n",
            (dir == 1) ? "FWD" : "BWD", speed);
 }
 
 static void wheel_stop(void) {
-    MODBUS_WriteRegister(1, 0x0040, 0);   // 左轮: USART3
-    MODBUS2_WriteRegister(2, 0x0040, 0);  // 右轮: USART2
+    wheel_write_speed_both(0);
     printf("[WHEEL] Stop\r\n");
 }
 
 // ========== 公共函数 ==========
 void wheel_init(void) {
-    RS485_Init(9600);    // USART3: 左轮 (PB10/PB11)
-    RS4852_Init(9600);   // USART2: 右轮 (PA2/PA3)
+    u8 link_ok = 0;
+
+    RS485_Init(9600, 1);    // USART3: 左轮 (PB10/PB11), 8E1
+    RS4852_Init(9600, 1);   // USART2: 右轮 (PA2/PA3), 8E1
+    link_ok = wheel_probe_link();
+    if (!link_ok) {
+        printf("[WHEEL] Probe failed with 8E1, retry 8N1...\r\n");
+        RS485_Init(9600, 0);
+        RS4852_Init(9600, 0);
+        link_ok = wheel_probe_link();
+    }
+    printf("[WHEEL] RS485 probe: %s\r\n", link_ok ? "OK" : "FAILED");
 
     // 设RS485通讯控制模式=占空比调速 (0x0080=0)
     MODBUS_WriteRegister(1, 0x0080, 0);   // 左轮
@@ -38,6 +84,8 @@ void wheel_init(void) {
     MODBUS_WriteRegister(1, 0x0044, 1);   // 左轮
     MODBUS2_WriteRegister(2, 0x0044, 1);  // 右轮
     delay_ms(50);
+
+    wheel_dump_driver_status();
 
     printf("[WHEEL] Init done: mode=duty_cycle, released\r\n");
 }
