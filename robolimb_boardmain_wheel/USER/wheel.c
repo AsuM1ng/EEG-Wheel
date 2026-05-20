@@ -50,6 +50,7 @@ static void wheel_start(u8 dir) {
         current_motion = 0;
         return;
     }
+    wheel_tick_ms = 0;
     wheel_state = WHEEL_STATE_RUN;
     printf("[WHEEL] Start: dir=%s speed=%d\r\n",
            (dir == 1) ? "FWD" : "BWD", speed);
@@ -74,6 +75,11 @@ void wheel_init(void) {
         link_ok = wheel_probe_link();
     }
     printf("[WHEEL] RS485 probe: %s\r\n", link_ok ? "OK" : "FAILED");
+    if (!link_ok) {
+        printf("[WHEEL] Init aborted: no driver response on both ports\r\n");
+        wheel_state = WHEEL_STATE_IDLE;
+        return;
+    }
 
     // 设RS485通讯控制模式=占空比调速 (0x0080=0)
     MODBUS_WriteRegister(1, 0x0080, 0);   // 左轮
