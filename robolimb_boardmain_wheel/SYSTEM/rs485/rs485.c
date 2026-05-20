@@ -2,6 +2,16 @@
 #include "delay.h"
 #include <stdio.h>
 
+static void rs485_dump_frame(const char *tag, const u8 *buf, u8 len)
+{
+    u8 i;
+    printf("%s len=%u :", tag, len);
+    for (i = 0; i < len; i++) {
+        printf(" %02X", buf[i]);
+    }
+    printf("\r\n");
+}
+
 static u8 modbus_crc_ok(const u8 *frame, u8 len)
 {
     u16 crc_calc;
@@ -112,6 +122,7 @@ void USART3_IRQHandler(void)
 void RS485_SendBytes(u8 *data, u16 len)
 {
     u16 i;
+    rs485_dump_frame("[RS485] TX", data, (u8)len);
     for (i = 0; i < len; i++) {
         while (USART_GetFlagStatus(RS485_USART, USART_FLAG_TC) == RESET);
         USART_SendData(RS485_USART, data[i]);
@@ -178,8 +189,8 @@ u8 MODBUS_WriteRegister(u8 slave_addr, u16 reg_addr, u16 value)
     u8 rx_len = RS485_WaitResponse(rx_buf, 8, 200);  // 200ms超时
 
     if (rx_len == 0) {
-        printf("[RS485] Write timeout! slave=%d reg=0x%04X val=%d\r\n",
-               slave_addr, reg_addr, (s16)value);
+        printf("[RS485] Write timeout! slave=%d reg=0x%04X val=%d rx_len=%u\r\n",
+               slave_addr, reg_addr, (s16)value, rs485_rx_len);
         return 1;  // 超时
     }
 
@@ -224,7 +235,7 @@ u8 MODBUS_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
     // 读响应: [ADR][0x03][字节数][数据H][数据L][CRCL][CRCH] = 7字节
     u8 rx_len = RS485_WaitResponse(rx_buf, 7, 200);
     if (rx_len == 0) {
-        printf("[RS485] Read timeout! slave=%d reg=0x%04X\r\n", slave_addr, reg_addr);
+        printf("[RS485] Read timeout! slave=%d reg=0x%04X rx_len=%u\r\n", slave_addr, reg_addr, rs485_rx_len);
         return 1;
     }
 
@@ -235,6 +246,7 @@ u8 MODBUS_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
 
     if (rx_len != 7 || rx_buf[0] != slave_addr || rx_buf[1] != 0x03 || rx_buf[2] != 0x02 || !modbus_crc_ok(rx_buf, 7)) {
         printf("[RS485] Read response invalid! slave=%d len=%d\r\n", slave_addr, rx_len);
+        rs485_dump_frame("[RS485] RX", rx_buf, rx_len);
         return 2;
     }
 
@@ -314,6 +326,7 @@ void USART2_IRQHandler(void)
 void RS4852_SendBytes(u8 *data, u16 len)
 {
     u16 i;
+    rs485_dump_frame("[RS485-2] TX", data, (u8)len);
     for (i = 0; i < len; i++) {
         while (USART_GetFlagStatus(USART2, USART_FLAG_TC) == RESET);
         USART_SendData(USART2, data[i]);
@@ -368,8 +381,8 @@ u8 MODBUS2_WriteRegister(u8 slave_addr, u16 reg_addr, u16 value)
 
     u8 rx_len = RS4852_WaitResponse(rx_buf, 8, 200);
     if (rx_len == 0) {
-        printf("[RS485-2] Write timeout! slave=%d reg=0x%04X val=%d\r\n",
-               slave_addr, reg_addr, (s16)value);
+        printf("[RS485-2] Write timeout! slave=%d reg=0x%04X val=%d rx_len=%u\r\n",
+               slave_addr, reg_addr, (s16)value, rs4852_rx_len);
         return 1;
     }
     if (rx_len != 8 || !modbus_crc_ok(rx_buf, 8) || rx_buf[0] != slave_addr || rx_buf[1] != 0x06) {
@@ -407,7 +420,7 @@ u8 MODBUS2_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
 
     u8 rx_len = RS4852_WaitResponse(rx_buf, 7, 200);
     if (rx_len == 0) {
-        printf("[RS485-2] Read timeout! slave=%d reg=0x%04X\r\n", slave_addr, reg_addr);
+        printf("[RS485-2] Read timeout! slave=%d reg=0x%04X rx_len=%u\r\n", slave_addr, reg_addr, rs4852_rx_len);
         return 1;
     }
     if (rx_buf[1] == 0x83) {
@@ -417,6 +430,7 @@ u8 MODBUS2_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
 
     if (rx_len != 7 || rx_buf[0] != slave_addr || rx_buf[1] != 0x03 || rx_buf[2] != 0x02 || !modbus_crc_ok(rx_buf, 7)) {
         printf("[RS485-2] Read response invalid! slave=%d len=%d\r\n", slave_addr, rx_len);
+        rs485_dump_frame("[RS485-2] RX", rx_buf, rx_len);
         return 2;
     }
 
