@@ -108,6 +108,17 @@ static u8 wheel_try_link(u32 baud, u8 even_parity)
     return ok;
 }
 
+static void wheel_print_comm_checklist(void)
+{
+    printf("[WHEEL][CHECK] Driver LED not 2Hz => no RS485 session established\r\n");
+    printf("[WHEEL][CHECK] 1) SW8 must be ON (485/CAN control mode)\r\n");
+    printf("[WHEEL][CHECK] 2) If 0x0120 changed, power-cycle driver to apply\r\n");
+    printf("[WHEEL][CHECK] 3) Try default comm mode (DIP 1~8 all ON)\r\n");
+    printf("[WHEEL][CHECK] 4) Verify A/B polarity (also test A/B swapped)\r\n");
+    printf("[WHEEL][CHECK] 5) Keep COM<->GND common reference\r\n");
+    printf("[WHEEL][CHECK] 6) If possible, verify same line with PC 485 tool\r\n");
+}
+
 // ========== 公共函数 ==========
 void wheel_init(void) {
     u8 link_ok = 0;
@@ -136,8 +147,10 @@ void wheel_init(void) {
         link_ok = wheel_try_link(115200, 0);
     }
     printf("[WHEEL] RS485 dual-bus probe: %s\r\n", link_ok ? "OK" : "FAILED");
+    printf("[WHEEL] Probe order: 9600/19200/115200 x 8E1/8N2, slave 1/2\r\n");
     if (!link_ok) {
         printf("[WHEEL] Init aborted: no driver response on both ports\r\n");
+        wheel_print_comm_checklist();
         wheel_state = WHEEL_STATE_IDLE;
         return;
     }

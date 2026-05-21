@@ -22,6 +22,23 @@ static u8 modbus_crc_ok(const u8 *frame, u8 len)
     return (crc_calc == crc_recv) ? 1 : 0;
 }
 
+// 方向控制开关: 1=使用DE/RE手动控制, 0=自动方向模块
+#define RS485_USE_DIR_CTRL  0
+
+#if RS485_USE_DIR_CTRL
+// USART3方向控制: PB12
+#define RS485_DIR_GPIO      GPIOB
+#define RS485_DIR_PIN       GPIO_Pin_12
+// USART2方向控制: PA1
+#define RS4852_DIR_GPIO     GPIOA
+#define RS4852_DIR_PIN      GPIO_Pin_1
+
+static void RS485_SetTxMode(void)  { GPIO_SetBits(RS485_DIR_GPIO, RS485_DIR_PIN); }
+static void RS485_SetRxMode(void)  { GPIO_ResetBits(RS485_DIR_GPIO, RS485_DIR_PIN); }
+static void RS4852_SetTxMode(void) { GPIO_SetBits(RS4852_DIR_GPIO, RS4852_DIR_PIN); }
+static void RS4852_SetRxMode(void) { GPIO_ResetBits(RS4852_DIR_GPIO, RS4852_DIR_PIN); }
+#endif
+
 // ========== 硬件定义 ==========
 // USART3: TX=PB10, RX=PB11
 #define RS485_USART        USART3
@@ -62,6 +79,15 @@ void RS485_Init(u32 baudrate, u8 even_parity)
 
     // 1. GPIO 时钟
     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOB, ENABLE);
+#if RS485_USE_DIR_CTRL
+    GPIO_InitStructure.GPIO_Pin = RS485_DIR_PIN;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+    GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+    GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(RS485_DIR_GPIO, &GPIO_InitStructure);
+    RS485_SetRxMode();
+#endif
     // 2. USART3 时钟
     RS485_USART_APB(RS485_USART_CLK, ENABLE);
 
@@ -104,7 +130,7 @@ void RS485_Init(u32 baudrate, u8 even_parity)
     NVIC_InitStructure.NVIC_IRQChannelCmd                 = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    printf("[RS485] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N2");
+    printf("[RS485] Init done, baud=%lu, %s, %s\r\n", baudrate, even_parity ? "8E1" : "8N2", RS485_USE_DIR_CTRL ? "dir-pin" : "auto-dir");
 }
 
 // ========== USART3 中断: 接收 ==========
@@ -123,11 +149,19 @@ void RS485_SendBytes(u8 *data, u16 len)
 {
     u16 i;
     rs485_dump_frame("[RS485] TX", data, (u8)len);
+#if RS485_USE_DIR_CTRL
+    RS485_SetTxMode();
+    delay_us(80);
+#endif
     for (i = 0; i < len; i++) {
         while (USART_GetFlagStatus(RS485_USART, USART_FLAG_TC) == RESET);
         USART_SendData(RS485_USART, data[i]);
     }
     while (USART_GetFlagStatus(RS485_USART, USART_FLAG_TC) == RESET);
+#if RS485_USE_DIR_CTRL
+    delay_us(80);
+    RS485_SetRxMode();
+#endif
 }
 
 // ========== 清接收缓冲 ==========
@@ -235,7 +269,7 @@ u8 MODBUS_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
     // 读响应: [ADR][0x03][字节数][数据H][数据L][CRCL][CRCH] = 7字节
     u8 rx_len = RS485_WaitResponse(rx_buf, 7, 200);
     if (rx_len == 0) {
-        printf("[RS485] Read timeout! slave=%d reg=0x%04X rx_len=%u\r\n", slave_addr, reg_addr, rs485_rx_len);
+        printf("[RS485] Read timeout! slave=%d reg=0x%04X rx_len=%u (no bytes)\r\n", slave_addr, reg_addr, rs485_rx_len);
         return 1;
     }
 
@@ -270,6 +304,15 @@ void RS4852_Init(u32 baudrate, u8 even_parity)
 
     // 1. GPIO 时钟
     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
+#if RS485_USE_DIR_CTRL
+    GPIO_InitStructure.GPIO_Pin = RS4852_DIR_PIN;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+    GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+    GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(RS4852_DIR_GPIO, &GPIO_InitStructure);
+    RS4852_SetRxMode();
+#endif
     // 2. USART2 时钟
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART2, ENABLE);
 
@@ -310,7 +353,7 @@ void RS4852_Init(u32 baudrate, u8 even_parity)
     NVIC_InitStructure.NVIC_IRQChannelCmd                 = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    printf("[RS485-2] Init done, baud=%lu, %s, auto-dir\r\n", baudrate, even_parity ? "8E1" : "8N2");
+    printf("[RS485-2] Init done, baud=%lu, %s, %s\r\n", baudrate, even_parity ? "8E1" : "8N2", RS485_USE_DIR_CTRL ? "dir-pin" : "auto-dir");
 }
 
 void USART2_IRQHandler(void)
@@ -327,11 +370,19 @@ void RS4852_SendBytes(u8 *data, u16 len)
 {
     u16 i;
     rs485_dump_frame("[RS485-2] TX", data, (u8)len);
+#if RS485_USE_DIR_CTRL
+    RS4852_SetTxMode();
+    delay_us(80);
+#endif
     for (i = 0; i < len; i++) {
         while (USART_GetFlagStatus(USART2, USART_FLAG_TC) == RESET);
         USART_SendData(USART2, data[i]);
     }
     while (USART_GetFlagStatus(USART2, USART_FLAG_TC) == RESET);
+#if RS485_USE_DIR_CTRL
+    delay_us(80);
+    RS4852_SetRxMode();
+#endif
 }
 
 static void RS4852_FlushRx(void)
@@ -420,7 +471,7 @@ u8 MODBUS2_ReadRegister(u8 slave_addr, u16 reg_addr, u16 *value)
 
     u8 rx_len = RS4852_WaitResponse(rx_buf, 7, 200);
     if (rx_len == 0) {
-        printf("[RS485-2] Read timeout! slave=%d reg=0x%04X rx_len=%u\r\n", slave_addr, reg_addr, rs4852_rx_len);
+        printf("[RS485-2] Read timeout! slave=%d reg=0x%04X rx_len=%u (no bytes)\r\n", slave_addr, reg_addr, rs4852_rx_len);
         return 1;
     }
     if (rx_buf[1] == 0x83) {
